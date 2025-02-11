@@ -1,0 +1,38 @@
+-- Extract files from the archive with 'tar' and verify that their contents are
+-- correct
+Expected output is in file 'test_results/raw/project_01-15-5-expected.tmp'
+Actual output is in file 'test_results/raw/project_01-15-5-actual.tmp'
+Test FAILED
+== Side-by-Side Comparison ==
+== Differing lines have a character like '|' '>' or '<' in the middle
+==== EXPECT ====                               ==== ACTUAL ====
+$ tar -xvf test.tar                            $ tar -xvf test.tar
+f1.txt                                         f1.txt
+f3.bin                                         f3.bin
+f5.txt                                         f5.txt
+f7.bin                                         f7.bin
+f1.txt                                       <
+f5.txt                                       <
+f7.bin                                       <
+$ diff -q f1.txt test_cases/resources/f2.txt   $ diff -q f1.txt test_cases/resources/f2.txt
+                                             > Files f1.txt and test_cases/resources/f2.txt differ
+$ diff -q f3.bin test_cases/resources/f3.bin   $ diff -q f3.bin test_cases/resources/f3.bin
+$ diff -q f5.txt test_cases/resources/f6.txt   $ diff -q f5.txt test_cases/resources/f6.txt
+                                             > Files f5.txt and test_cases/resources/f6.txt differ
+$ diff -q f7.bin test_cases/resources/f8.bin   $ diff -q f7.bin test_cases/resources/f8.bin
+                                             > Files f7.bin and test_cases/resources/f8.bin differ
+$ rm -rf test_files/                           $ rm -rf test_files/
+$ mkdir test_files                             $ mkdir test_files
+$ mv f1.txt test_files/                        $ mv f1.txt test_files/
+$ mv f3.bin test_files/                        $ mv f3.bin test_files/
+$ mv f5.txt test_files/                        $ mv f5.txt test_files/
+$ mv f7.bin test_files/                        $ mv f7.bin test_files/
+$ exit                                         $ exit
+exit                                           exit
+== Line Differences ==
+EXPECT  6) f1.txt
+EXPECT  7) f5.txt
+EXPECT  8) f7.bin
+ACTUAL  7) Files f1.txt and test_cases/resources/f2.txt differ
+ACTUAL 10) Files f5.txt and test_cases/resources/f6.txt differ
+ACTUAL 12) Files f7.bin and test_cases/resources/f8.bin differ

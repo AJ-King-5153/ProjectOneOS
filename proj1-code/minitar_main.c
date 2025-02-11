@@ -34,25 +34,25 @@ int main(int argc, char **argv) {
         file_list_add(&files, argv[i]);
     }
 
-    int result;
+    int result = 0;
     switch(operation) {
         case 'c':
-            result = minitar_create(archiveName, &files);
+            result = create_archive(archiveName, &files);
             break;
         case 'a':
-            result = minitar_append(archiveName, &files);
+            result = append_files_to_archive(archiveName, &files);
             break;
         case 't':
-            result = minitar_list(archiveName);
+            result = get_archive_file_list(archiveName, &files);
             break;
         case 'u':
-            result = -1;//our own update function
+            //result = -1;//our own update function
             break;
         case 'x':
-            result = minitar_extract(archiveName);
+            //result = minitar_extract(archiveName);
             break;
         default:
-            perror("Improper command line arguments");
+            //perror("Improper command line arguments");
             return -1;
 
     }
