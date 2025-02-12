@@ -1,24 +1,4 @@
 -- List the files in the previously created archive
 Expected output is in file 'test_results/raw/project_01-12-5-expected.tmp'
 Actual output is in file 'test_results/raw/project_01-12-5-actual.tmp'
-Test FAILED
-== Side-by-Side Comparison ==
-== Differing lines have a character like '|' '>' or '<' in the middle
-==== EXPECT ====   ==== ACTUAL ====
-hello.txt          hello.txt
-f18.txt            f18.txt
-f20.bin            f20.bin
-f19.bin            f19.bin
-f13.txt            f13.txt
-gatsby.txt         gatsby.txt
-f7.txt           | ���]��Ȍ�x��,rB��y��xV�N�R} '�P�=H���(+g�~�w���0'Õ����4�O-Q`�Ǻ?�w�x	s6�{c��E��{s�G�fI��/�_;�&��斐�mi��{�[f��C,,R�Ӭ�g�q5"��>;�]]�Ͱ����9�gú=TlH��;��!�h��"ը�NU
-f7.bin           | ��t�+�@�d2(VyO2	�R�D{B�  ��g�����W�O���W&�\�,��(�!|���S�H�:��� �t1F��[��$���I
-                 > Failed to read header from file test.tar
-                 > : Success
-== Line Differences ==
-EXPECT  7) f7.txt
-ACTUAL  7) ���]��Ȍ�x��,rB��y��xV�N�R} '�P�=H���(+g�~�w���0'Õ����4�O-Q`�Ǻ?�w�x	s6�{c��E��{s�G�fI��/�_;�&��斐�mi��{�[f��C,,R�Ӭ�g�q5"��>;�]]�Ͱ����9�gú=TlH��;��!�h��"ը�NU
-EXPECT  8) f7.bin
-ACTUAL  8) ��t�+�@�d2(VyO2	�R�D{B�  ��g�����W�O���W&�\�,��(�!|���S�H�:��� �t1F��[��$���I
-ACTUAL  9) Failed to read header from file test.tar
-ACTUAL 10) : Success
+Test PASSED

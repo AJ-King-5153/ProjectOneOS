@@ -133,7 +133,6 @@ int create_archive(const char *archive_name, const file_list_t *files) {
         perror(err_msg);
         return -1;
     }
-    // get the first file node from the argument list
     node_t *curr_file = files->head;
     // malloc space for the headers of the files to be archived
     tar_header *curr_header = malloc(sizeof(tar_header));
@@ -211,116 +210,93 @@ int create_archive(const char *archive_name, const file_list_t *files) {
 
 int append_files_to_archive(const char *archive_name, const file_list_t *files) {
     char err_msg[MAX_MSG_LEN];
+    // open the archive in read + write mode and error check
     FILE *minitar = fopen(archive_name, "r+");
     if (minitar == NULL) {
-        snprintf(err_msg, MAX_MSG_LEN, "Failed to open %s", archive_name);
+        snprintf(err_msg, MAX_MSG_LEN, "Failed to open archive for appending: %s\n", archive_name);
         perror(err_msg);
         return -1;
     }
-    // Seek to EOF minus the size of the last two blocks
-    fseek(minitar, -BLOCK_SIZE * NUM_TRAILING_BLOCKS, SEEK_END);
-    node_t *curr = files->head;
-    // Iterate through all files in the list
-    while (curr != NULL) {
-        // Create a tar header for the current file
-        tar_header *header = malloc(sizeof(tar_header));
-        if (header == NULL) {
-            snprintf(err_msg, MAX_MSG_LEN, "Failed to allocate memory for header for %s",
-                     curr->name);
-            perror(err_msg);
-            fclose(minitar);
-            return -1;
+    // seek to the end of the archive minus the last two 0 header blocks
+    tar_header header;
+    while (fread(&header, sizeof(header), 1, minitar) == 1) {
+        if (header.name[0] == '\0') {  // found the end header
+            fseek(minitar, -sizeof(header), SEEK_CUR);
+            break;
         }
-        // Fill the header with the metadata of the file
-        int tar_error = fill_tar_header(header, curr->name);
+        // skipping the actual file contents
+        int file_size = strtol(header.size, NULL, 8);
+        int blocks = (file_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        fseek(minitar, blocks * BLOCK_SIZE, SEEK_CUR);
+    }
+    // get the first file node from the argument list
+    node_t *curr_file = files->head;
+    tar_header *curr_header = malloc(sizeof(tar_header));
+    while (curr_file != NULL) {
+        // fill the tar header and error check
+        int tar_error = fill_tar_header(curr_header, curr_file->name);
         if (tar_error != 0) {
-            snprintf(err_msg, MAX_MSG_LEN, "Failed to create tar header for %s", curr->name);
-            perror(err_msg);
-            free(header);
+            free(curr_header);
             fclose(minitar);
+            snprintf(err_msg, MAX_MSG_LEN, "Failed to create header for %s\n", curr_file->name);
+            perror(err_msg);
             return -1;
         }
-        // Write the header to the archive
-        size_t header_written = fwrite(header, 1, sizeof(tar_header), minitar);
-        if (header_written != sizeof(tar_header)) {
-            snprintf(err_msg, MAX_MSG_LEN, "Failed to write header for %s to archive", curr->name);
-            perror(err_msg);
-            free(header);
+        // write the file header and error check
+        if (fwrite(curr_header, sizeof(tar_header), 1, minitar) != 1) {
+            free(curr_header);
             fclose(minitar);
+            snprintf(err_msg, MAX_MSG_LEN, "Failed to write header for %s\n", curr_file->name);
+            perror(err_msg);
             return -1;
         }
-        // Open the file for reading its content
-        FILE *fp_curr = fopen(curr->name, "r");
-        if (fp_curr == NULL) {
-            snprintf(err_msg, MAX_MSG_LEN, "Failed to open file for reading: %s", curr->name);
-            perror(err_msg);
-            free(header);
+        FILE *fp = fopen(curr_file->name, "r");
+        if (fp == NULL) {
+            free(curr_header);
             fclose(minitar);
+            snprintf(err_msg, MAX_MSG_LEN, "Failed to open file for reading: %s\n", curr_file->name);
+            perror(err_msg);
             return -1;
         }
-        // Read the file and write its contents to the archive in 512-byte blocks
+        // write file block data
         size_t bytes_read;
-        size_t bytes_written;
         char stored_data[BLOCK_SIZE];
-        while ((bytes_read = fread(stored_data, 1, BLOCK_SIZE, fp_curr)) > 0) {
-            bytes_written = fwrite(stored_data, 1, bytes_read, minitar);
-            if (bytes_written != bytes_read) {
-                snprintf(err_msg, MAX_MSG_LEN, "Failed to write data from %s to archive",
-                         curr->name);
-                perror(err_msg);
-                fclose(fp_curr);
-                free(header);
+        while ((bytes_read = fread(stored_data, 1, BLOCK_SIZE, fp)) > 0) {
+            // bytes read shall always = bytes written
+            if (fwrite(stored_data, 1, bytes_read, minitar) != bytes_read) {
+                free(curr_header);
                 fclose(minitar);
+                fclose(fp);
+                snprintf(err_msg, MAX_MSG_LEN, "Error writing file data for %s\n", curr_file->name);
+                perror(err_msg);
                 return -1;
             }
-        }
-        // Pad the file if it is not a multiple of BLOCK_SIZE
-        size_t padding = BLOCK_SIZE - (bytes_read % BLOCK_SIZE);
-        if (padding != BLOCK_SIZE) {
-            memset(stored_data, 0, padding);
-            bytes_written = fwrite(stored_data, 1, padding, minitar);
-            if (bytes_written != padding) {
-                snprintf(err_msg, MAX_MSG_LEN, "Failed to pad %s to 512 bytes", curr->name);
-                perror(err_msg);
-                fclose(fp_curr);
-                free(header);
-                fclose(minitar);
-                return -1;
+            // pad to 512 bytes
+            if (bytes_read < BLOCK_SIZE) {
+                char padding[BLOCK_SIZE] = {0};
+                fwrite(padding, 1, BLOCK_SIZE - bytes_read, minitar);
             }
         }
-        // Close the file
-        fclose(fp_curr);
-        free(header);
-        // Move to the next file in the list
-        curr = curr->next;
+        fclose(fp);
+        curr_file = curr_file->next;
     }
-    // Write two trailing blocks of zeros at the end of the archive
-    char zero_block[BLOCK_SIZE] = {0};
-    if (fwrite(zero_block, 1, BLOCK_SIZE, minitar) != BLOCK_SIZE) {
-        snprintf(err_msg, MAX_MSG_LEN, "Failed to write trailing zero block to archive");
-        perror(err_msg);
-        fclose(minitar);
-        return -1;
-    }
-    if (fwrite(zero_block, 1, BLOCK_SIZE, minitar) != BLOCK_SIZE) {
-        snprintf(err_msg, MAX_MSG_LEN, "Failed to write second trailing zero block to archive");
-        perror(err_msg);
-        fclose(minitar);
-        return -1;
-    }
-    // Close the archive file
+    // fill two blocks of 0's as footer
+    char zeros[BLOCK_SIZE * 2] = {0};
+    fwrite(zeros, 1, sizeof(zeros), minitar);
+    free(curr_header);
     fclose(minitar);
     return 0;
 }
+
 
 // helper function for checking if the block is all zeros
 int is_all_zeros(const char *block) {
     for (size_t i = 0; i < BLOCK_SIZE; i++) {
         if (block[i] != 0) {
-            return 0;    // not a zero block
+            return 0;// not a zero block
         }
     }
-    return 1;    // is a zero block
+    return 1;// is a zero block
 }
 
 int get_archive_file_list(const char *archive_name, file_list_t *files) {
@@ -357,7 +333,7 @@ int get_archive_file_list(const char *archive_name, file_list_t *files) {
             }
         }
         // print file name
-        printf("%s\n", header.name);
+        printf("%s\n", header.name); // we need to figure out how to print the file names in main, not in here.
         // convert the octal string to a long
         long file_size = strtol(header.size, NULL, 8);
         // calculate the number of blocks to seek

@@ -12,17 +12,16 @@ int main(int argc, char **argv) {
 
     file_list_t files;
     file_list_init(&files);
-
-
-
     // TODO: Parse command-line arguments and invoke functions from 'minitar.h'
     // to execute archive operations
 
     char operation = argv[1][1];
+    // ensure operation flag is properly formatted
     if (argv[1][0] != '-') {
         perror("Improper command line arguments");
         return 1;
     }
+    // make sure "-f" flag is there
     if (strcmp(argv[2], "-f") != 0) {
         perror("Improper command line arguments");
         return 1;
@@ -38,12 +37,27 @@ int main(int argc, char **argv) {
     switch(operation) {
         case 'c':
             result = create_archive(archiveName, &files);
+            if (result != 0) {
+                perror("Failed to create archive");
+            }
             break;
         case 'a':
             result = append_files_to_archive(archiveName, &files);
+            if (result != 0) {
+                perror("Failed to append files to archive");
+            }
             break;
         case 't':
             result = get_archive_file_list(archiveName, &files);
+            if (result == 0) {
+                node_t *current = files.head;
+                while (current != NULL) {
+                    printf("%s\n", current->name);
+                    current = current->next;
+                }
+            } else {
+                perror("Failed to get archive file list");
+            }
             break;
         case 'u':
             //result = -1;//our own update function
@@ -52,7 +66,7 @@ int main(int argc, char **argv) {
             //result = minitar_extract(archiveName);
             break;
         default:
-            //perror("Improper command line arguments");
+            perror("Improper command line arguments");
             return -1;
 
     }
