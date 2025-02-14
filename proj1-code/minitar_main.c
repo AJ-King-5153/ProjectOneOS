@@ -60,7 +60,7 @@ int main(int argc, char **argv) {
             }
             break;
         case 'u':
-            //result = -1;//our own update function
+            result = update_archive(archiveName, &files);
             break;
         case 'x':
             //result = minitar_extract(archiveName);

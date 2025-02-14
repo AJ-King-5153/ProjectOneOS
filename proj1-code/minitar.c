@@ -124,6 +124,22 @@ int remove_trailing_bytes(const char *file_name, size_t nbytes) {
     return 0;
 }
 
+// helper function for checking if the block is all zeros
+int is_all_zeros(const char *block) {
+    for (size_t i = 0; i < BLOCK_SIZE; i++) {
+        if (block[i] != 0) {
+            return 0;    // not a zero block
+        }
+    }
+    return 1;    // is a zero block
+}
+
+void write_tar_footer(FILE *archive) {
+    char zero_block[BLOCK_SIZE] = {0};
+    fwrite(zero_block, 1, BLOCK_SIZE, archive);
+    fwrite(zero_block, 1, BLOCK_SIZE, archive);
+}
+
 int create_archive(const char *archive_name, const file_list_t *files) {
     char err_msg[MAX_MSG_LEN];
     FILE *minitar = fopen(archive_name, "w");
@@ -220,7 +236,7 @@ int append_files_to_archive(const char *archive_name, const file_list_t *files) 
     // seek to the end of the archive minus the last two 0 header blocks
     tar_header header;
     while (fread(&header, sizeof(header), 1, minitar) == 1) {
-        if (header.name[0] == '\0') {  // found the end header
+        if (header.name[0] == '\0') {    // found the end header
             fseek(minitar, -sizeof(header), SEEK_CUR);
             break;
         }
@@ -254,7 +270,8 @@ int append_files_to_archive(const char *archive_name, const file_list_t *files) 
         if (fp == NULL) {
             free(curr_header);
             fclose(minitar);
-            snprintf(err_msg, MAX_MSG_LEN, "Failed to open file for reading: %s\n", curr_file->name);
+            snprintf(err_msg, MAX_MSG_LEN, "Failed to open file for reading: %s\n",
+                     curr_file->name);
             perror(err_msg);
             return -1;
         }
@@ -288,15 +305,115 @@ int append_files_to_archive(const char *archive_name, const file_list_t *files) 
     return 0;
 }
 
-
-// helper function for checking if the block is all zeros
-int is_all_zeros(const char *block) {
-    for (size_t i = 0; i < BLOCK_SIZE; i++) {
-        if (block[i] != 0) {
-            return 0;// not a zero block
-        }
+int update_archive(const char *archive_name, file_list_t *files) {
+    char err_msg[MAX_MSG_LEN];
+    FILE *archive = fopen(archive_name, "r+");
+    if (!archive) {
+        perror("Error: Could not open archive for updating.");
+        return -1;
     }
-    return 1;// is a zero block
+    // get list of files currently in the archive
+    file_list_t archive_files;
+    file_list_init(&archive_files);
+    if (get_archive_file_list(archive_name, &archive_files) == -1) {
+        perror("Error: Failed to get archive file list.");
+        fclose(archive);
+        return -1;
+    }
+    // checks all specified files making sure they exist in the archive
+    if (!file_list_is_subset(files, &archive_files)) {
+        printf("Error: One or more of the specified files is not already present in archive");
+        file_list_clear(&archive_files);
+        fclose(archive);
+        return -1;
+    }
+    // seek to the end of the archive minus the last two 0 header blocks
+    fseek(archive, -2 * BLOCK_SIZE, SEEK_END);
+
+    // get the first file node from the argument list
+    node_t *curr_file = files->head;
+
+    // malloc space for the headers of the files to be archived
+    tar_header *curr_header = malloc(sizeof(tar_header));
+    if (curr_header == NULL) {
+        fclose(archive);
+        snprintf(err_msg, MAX_MSG_LEN, "Failed to allocate memory for header\n");
+        perror(err_msg);
+        return -1;
+    }
+
+    while (curr_file != NULL) {
+        // use function to fill header, then error check
+        int tar_error = fill_tar_header(curr_header, curr_file->name);
+        if (tar_error != 0) {
+            free(curr_header);
+            fclose(archive);
+            snprintf(err_msg, MAX_MSG_LEN, "Failed to create minitar header for %s\n",
+                     curr_file->name);
+            perror(err_msg);
+            return -1;
+        }
+        // write the file header to the archive file
+        size_t header_bytes_written = fwrite(curr_header, sizeof(tar_header), 1, archive);
+        // should only write 1 element
+        if (header_bytes_written != 1) {
+            free(curr_header);
+            fclose(archive);
+            snprintf(err_msg, MAX_MSG_LEN, "Failed to write minitar header for %s\n",
+                     curr_file->name);
+            perror(err_msg);
+            return -1;
+        }
+
+        // open the current file name in reading mode
+        FILE *fp_curr = fopen(curr_file->name, "r");
+        if (fp_curr == NULL) {
+            free(curr_header);
+            fclose(archive);
+            snprintf(err_msg, MAX_MSG_LEN, "Failed to open file for reading: %s\n",
+                     curr_file->name);
+            perror(err_msg);
+            return -1;
+        }
+
+        // initialize variables that will be used in current file reading and minitar writing
+        size_t bytes_read;
+        size_t bytes_written;
+        char stored_data[BLOCK_SIZE];
+        // reads 1 byte 512 times from the current file
+        while ((bytes_read = fread(stored_data, 1, BLOCK_SIZE, fp_curr)) > 0) {
+            // write 1 byte 512 times to minitar
+            bytes_written = fwrite(stored_data, 1, bytes_read, archive);
+            if (bytes_written != bytes_read) {
+                free(curr_header);
+                fclose(archive);
+                fclose(fp_curr);
+                snprintf(err_msg, MAX_MSG_LEN,
+                         "Bytes lost while reading from %s and writing to %s\n", curr_file->name,
+                         archive_name);
+                perror(err_msg);
+                return -1;
+            }
+
+            // if file size isnt a multiple of 512 then w fill the rest with 0's
+            if (bytes_read < BLOCK_SIZE) {
+                char padding[BLOCK_SIZE] = {0};
+                fwrite(padding, 1, BLOCK_SIZE - bytes_read, archive);
+            }
+        }
+        fclose(fp_curr);
+        curr_file = curr_file->next;
+    }
+
+    // write new footer
+    write_tar_footer(archive);
+    free(curr_header);
+    file_list_clear(&archive_files);
+    if (fclose(archive) == EOF) {
+        perror("Error: Failed to close archive.");
+        return -1;
+    }
+    return 0;
 }
 
 int get_archive_file_list(const char *archive_name, file_list_t *files) {
@@ -309,22 +426,30 @@ int get_archive_file_list(const char *archive_name, file_list_t *files) {
         return -1;
     }
     // initialize header var to read headers into
-    tar_header header;
+    tar_header *header = malloc(sizeof(tar_header));
+    if (header == NULL) {
+        fclose(minitar);
+        snprintf(err_msg, MAX_MSG_LEN, "Failed to allocate memory for header\n");
+        perror(err_msg);
+        return -1;
+    }
     // initialize block to read the potential second zero block in
     char block[BLOCK_SIZE] = {0};
+    // while true
     while (1) {
         // resets header to 0 before reading in
-        memset(&header, 0, sizeof(tar_header));
+        memset(header, 0, sizeof(tar_header));
         // read the header block in
-        size_t bytes_read = fread(&header, 1, BLOCK_SIZE, minitar);
+        size_t bytes_read = fread(header, 1, BLOCK_SIZE, minitar);
         if (bytes_read != BLOCK_SIZE) {
+            free(header);
             fclose(minitar);
             snprintf(err_msg, MAX_MSG_LEN, "Failed to read header from file %s\n", archive_name);
             perror(err_msg);
             return -1;
         }
         // check if block read is all zeros, if it is check next
-        if (is_all_zeros((const char *) &header)) {
+        if (is_all_zeros((const char *) header)) {
             // if in here, block just read is all zeros, need to check next block
             bytes_read = fread(block, 1, BLOCK_SIZE, minitar);
             if (bytes_read == BLOCK_SIZE && is_all_zeros(block)) {
@@ -332,10 +457,16 @@ int get_archive_file_list(const char *archive_name, file_list_t *files) {
                 break;
             }
         }
-        // print file name
-        printf("%s\n", header.name); // we need to figure out how to print the file names in main, not in here.
+        // add files to the linked list
+        if (file_list_add(files, header->name) == 1) {
+            free(header);
+            fclose(minitar);
+            snprintf(err_msg, MAX_MSG_LEN, "Failed to add file to the file list\n");
+            perror(err_msg);
+            return -1;
+        }
         // convert the octal string to a long
-        long file_size = strtol(header.size, NULL, 8);
+        long file_size = strtol(header->size, NULL, 8);
         // calculate the number of blocks to seek
         // (Block_Size represents the header we read in, file size is the length of the file we are
         // about to skip) by  diving by block size we get the number of blocks to skip, can multiply
@@ -343,11 +474,105 @@ int get_archive_file_list(const char *archive_name, file_list_t *files) {
         size_t blocks_seek = (file_size + BLOCK_SIZE) / BLOCK_SIZE;
         fseek(minitar, blocks_seek * BLOCK_SIZE, SEEK_CUR);
     }
+    free(header);
     fclose(minitar);
     return 0;
 }
 
 int extract_files_from_archive(const char *archive_name) {
-    // TODO: Not yet implemented
+    char err_msg[MAX_MSG_LEN];
+    FILE *minitar = fopen(archive_name, "r");
+    if (minitar == NULL) {
+        snprintf(err_msg, MAX_MSG_LEN, "Failed to open minitar file %s\n", archive_name);
+        perror(err_msg);
+        return -1;
+    }
+    // initialize variabales for reading / writing
+    tar_header *curr_header = malloc(sizeof(tar_header));
+    if (curr_header == NULL) {
+        fclose(minitar);
+        snprintf(err_msg, MAX_MSG_LEN, "Failed to allocate memory for header\n");
+        perror(err_msg);
+        return -1;
+    }
+    char curr_file_name[100];    // size of filename
+    long curr_file_size;
+    size_t bytes_read;
+    size_t total_bytes_remaining;
+    size_t bytes_written;
+    size_t bytes_to_write;
+    char stored_data[BLOCK_SIZE];
+    // initialize block to read the potential second zero block in
+    char block[BLOCK_SIZE] = {0};
+    // while true
+    while (1) {
+        // resets header to 0 before reading in
+        memset(curr_header, 0, sizeof(tar_header));
+        // read in header
+        bytes_read = fread(curr_header, 1, BLOCK_SIZE, minitar);
+        if (bytes_read != BLOCK_SIZE) {
+            free(curr_header);
+            fclose(minitar);
+            snprintf(err_msg, MAX_MSG_LEN, "Failed to read tar header in file %s\n", archive_name);
+            perror(err_msg);
+            return -1;
+        }
+        // check if block read is all zeros, if it is check next
+        if (is_all_zeros((const char *) curr_header)) {
+            // if in here, block just read is all zeros, need to check next block
+            bytes_read = fread(block, 1, BLOCK_SIZE, minitar);
+            if (bytes_read == BLOCK_SIZE && is_all_zeros(block)) {
+                // two consecutive zero blocks so break from the loop
+                break;
+            }
+        }
+        // safe copy the string exactly length of filename
+        strncpy(curr_file_name, curr_header->name, sizeof(curr_file_name));
+        curr_file_size = strtol(curr_header->size, NULL, 8);
+
+        FILE *curr_file = fopen(curr_file_name, "w");
+        if (curr_file == NULL) {
+            free(curr_header);
+            fclose(minitar);
+            snprintf(err_msg, MAX_MSG_LEN, "Failed to open file for writing\n");
+            perror(err_msg);
+            return -1;
+        }
+
+        total_bytes_remaining = curr_file_size;
+        // read and write bytes until wev have none remaining
+        while (total_bytes_remaining > 0) {
+            bytes_read = fread(stored_data, 1, BLOCK_SIZE, minitar);
+            if (bytes_read != BLOCK_SIZE) {
+                free(curr_header);
+                fclose(minitar);
+                fclose(curr_file);
+                snprintf(err_msg, MAX_MSG_LEN, "Failed to read data block\n");
+                perror(err_msg);
+                return -1;
+            }
+
+            // this would indicate that this block
+            if (total_bytes_remaining < BLOCK_SIZE) {
+                bytes_to_write = total_bytes_remaining;
+            } else {
+                bytes_to_write = BLOCK_SIZE;
+            }
+
+            bytes_written = fwrite(stored_data, 1, bytes_to_write, curr_file);
+            if (bytes_written != bytes_to_write) {
+                free(curr_header);
+                fclose(minitar);
+                fclose(curr_file);
+                snprintf(err_msg, MAX_MSG_LEN, "Failed to write correct amount of bytes\n");
+                perror(err_msg);
+                return -1;
+            }
+            total_bytes_remaining -= bytes_written;
+        }
+        fclose(curr_file);
+    }
+    free(curr_header);
+    fclose(minitar);
     return 0;
 }
