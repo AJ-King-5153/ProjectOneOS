@@ -1,0 +1,15 @@
+==49576== Memcheck, a memory error detector
+==49576== Copyright (C) 2002-2017, and GNU GPL'd, by Julian Seward et al.
+==49576== Using Valgrind-3.18.1 and LibVEX; rerun with -h for copyright info
+==49576== Command: ./minitar -c -f test.tar hello.txt f18.txt f20.bin f19.bin f13.txt
+==49576== Parent PID: 49066
+==49576== 
+==49576== 
+==49576== HEAP SUMMARY:
+==49576==     in use at exit: 0 bytes in 0 blocks
+==49576==   total heap usage: 54 allocs, 54 frees, 62,241 bytes allocated
+==49576== 
+==49576== All heap blocks were freed -- no leaks are possible
+==49576== 
+==49576== For lists of detected and suppressed errors, rerun with: -s
+==49576== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
